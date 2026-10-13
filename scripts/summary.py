@@ -50,7 +50,8 @@ def main() -> None:
             print(f"| {y['year']} | {y['count']} | {y['latestIssue']} |")
         print("\n</details>\n")
 
-    print("<sub>数据来源：中国福利彩票发行管理中心官方开奖公告。"
+    print("<sub>数据来源：中国福利彩票发行管理中心官方开奖公告"
+          "（官网不可达时自动切换 17500 备用源）。"
           "本项目仅供数据研究，不构成投注建议。</sub>")
 
 

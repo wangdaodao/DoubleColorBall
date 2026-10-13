@@ -63,6 +63,9 @@
   tbody tr:hover{background:rgba(127,127,127,.06)}
   td.code{font-weight:600;white-space:nowrap}
   td.sum{color:var(--muted)}
+  td.balls-cell{white-space:nowrap}
+  td.balls-cell .ball{display:inline-flex;margin-right:5px;vertical-align:middle}
+  td.balls-cell .ball.b{margin-left:7px}
   .empty{padding:44px 16px;text-align:center;color:var(--muted)}
   .load{display:block;margin:16px auto 0}
   footer{margin-top:26px;text-align:center;color:var(--muted);font-size:12px}
@@ -93,8 +96,7 @@
   <table>
     <thead>
       <tr>
-        <th>期号</th><th>开奖日期</th><th>星期</th>
-        <th>红球</th><th>和值</th><th>蓝球</th>
+        <th>期号</th><th>开奖日期</th><th>红球</th><th>蓝球</th><th>和值</th>
       </tr>
     </thead>
     <tbody id="rows"></tbody>
@@ -102,7 +104,7 @@
   <button class="load hidden" id="more">加载更多</button>
 
   <footer>
-    数据来源：中国福利彩票发行管理中心 / 中彩网 ·
+    数据来源：中国福利彩票发行管理中心 / 中彩网 / 17500 ·
     <a href="https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/" target="_blank"
        rel="noopener">开奖公告</a><br>
     本项目仅供数据研究，不构成任何投注建议
@@ -149,18 +151,16 @@ function renderLatest(latest) {
 
 function renderRows() {
   shown = Math.min(shown + PAGE, filtered.length);
-  const w = {Mon:"一",Tue:"二",Wed:"三",Thu:"四",Fri:"五",Sat:"六",Sun:"日"};
   $("rows").innerHTML = filtered.slice(0, shown).map(it => `
     <tr>
       <td class="code">${it.code}</td>
       <td>${it.date}</td>
-      <td>${w[it.week] || "-"}</td>
-      <td style="white-space:nowrap">${it.red.map(n =>
-        `<span class="ball sm r">${pad(n)}</span>`).join(" ")}</td>
+      <td class="balls-cell">${it.red.map(n =>
+        `<span class="ball sm r">${pad(n)}</span>`).join(" ")}
+        <span class="ball sm b">${pad(it.blue)}</span></td>
       <td class="sum">${it.sum}</td>
-      <td>${ballHTML(it.blue, "b sm")}</td>
     </tr>`).join("") ||
-    `<tr><td colspan="6" class="empty">没有匹配的记录</td></tr>`;
+    `<tr><td colspan="5" class="empty">没有匹配的记录</td></tr>`;
   $("count").textContent =
     `共 ${filtered.length} 期` + (shown < filtered.length ? `（已显示 ${shown}）` : "");
   $("more").classList.toggle("hidden", shown >= filtered.length);
@@ -174,11 +174,11 @@ function applyFilter() {
 }
 
 async function loadYear(year) {
-  $("rows").innerHTML = `<tr><td colspan="6" class="empty">加载中…</td></tr>`;
+  $("rows").innerHTML = `<tr><td colspan="5" class="empty">加载中…</td></tr>`;
   const data = await getJSON(year + ".json");
   current = data.data.slice().sort((a, b) => b.code.localeCompare(a.code));
   shown = 0;
-  renderRows();
+  applyFilter();
 }
 
 async function init() {
@@ -207,7 +207,7 @@ async function init() {
   } catch (err) {
     $("meta").textContent = "";
     $("rows").innerHTML =
-      `<tr><td colspan="6" class="empty">数据加载失败：${err.message}<br>
+      `<tr><td colspan="5" class="empty">数据加载失败：${err.message}<br>
        <br>本地预览请用 HTTP 服务打开（直接双击 index.html 会被浏览器拦截读取）。</td></tr>`;
   }
 }

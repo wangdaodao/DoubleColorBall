@@ -41,10 +41,10 @@ jobs:
         run: |
           set -euo pipefail
           python scripts/fetch_ssq.py --years-back "$YEARS_BACK" 2>&1 | tee fetch.log
-          # 部分年份抓取失败时脚本返回 2：保留警告但不算失败
+          # 部分/全部年份抓取失败时脚本返回 2：保留警告但不算失败
           rc=${PIPESTATUS[0]}
           if [ "$rc" -eq 2 ]; then
-            echo "::warning::部分年份抓取失败，已保留原有数据"
+            echo "::warning::部分或全部年份抓取失败，已保留原有数据（详见日志）"
           elif [ "$rc" -ne 0 ]; then
             echo "::error::抓取失败（退出码 $rc）"
             cat fetch.log

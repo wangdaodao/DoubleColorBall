@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>双色球开奖数据</title>
+<style>
+  :root{
+    --bg:#f6f7f9; --card:#fff; --text:#1a1a1a; --muted:#6b7280;
+    --border:#e5e7eb; --red:#e0392f; --blue:#1a6fd4; --accent:#c0392b;
+  }
+  @media (prefers-color-scheme: dark){
+    :root{
+      --bg:#14161a; --card:#1e2126; --text:#e8eaed; --muted:#9aa0a6;
+      --border:#2f343b; --red:#ff6b5e; --blue:#5aa9ff; --accent:#ff8a75;
+    }
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; padding:24px 16px 60px; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC",
+      "Hiragino Sans GB","Microsoft YaHei",sans-serif;
+    line-height:1.6;
+  }
+  .wrap{max-width:960px;margin:0 auto}
+  header{text-align:center;margin-bottom:22px}
+  h1{margin:0 0 6px;font-size:26px;letter-spacing:1px}
+  .meta{color:var(--muted);font-size:13px}
+
+  .latest{
+    background:var(--card);border:1px solid var(--border);border-radius:14px;
+    padding:20px;margin-bottom:18px;box-shadow:0 1px 3px rgba(0,0,0,.05);
+  }
+  .latest h2{margin:0 0 14px;font-size:14px;color:var(--muted);font-weight:600;
+    letter-spacing:1px}
+  .balls{display:flex;flex-wrap:wrap;gap:9px;align-items:center}
+  .ball{
+    width:42px;height:42px;border-radius:50%;display:flex;align-items:center;
+    justify-content:center;font-size:17px;font-weight:700;color:#fff;
+    font-variant-numeric:tabular-nums;
+  }
+  .ball.r{background:radial-gradient(circle at 32% 28%,#ff7a70,var(--red))}
+  .ball.b{background:radial-gradient(circle at 32% 28%,#63b3ff,var(--blue))}
+  .ball.sm{width:30px;height:30px;font-size:13px}
+
+  .controls{
+    display:flex;flex-wrap:wrap;gap:10px;align-items:center;
+    margin-bottom:14px;
+  }
+  select,input{
+    background:var(--card);color:var(--text);border:1px solid var(--border);
+    border-radius:9px;padding:8px 11px;font-size:14px;font-family:inherit;
+  }
+  select:focus,input:focus{outline:2px solid var(--accent);outline-offset:1px}
+
+  table{width:100%;border-collapse:collapse;background:var(--card);
+    border:1px solid var(--border);border-radius:12px;overflow:hidden}
+  th,td{padding:9px 10px;text-align:center;border-bottom:1px solid var(--border);
+    font-size:14px;font-variant-numeric:tabular-nums}
+  th{background:rgba(127,127,127,.08);font-weight:600;font-size:13px;
+    color:var(--muted);position:sticky;top:0;backdrop-filter:blur(4px)}
+  tr:last-child td{border-bottom:none}
+  tbody tr:hover{background:rgba(127,127,127,.06)}
+  td.code{font-weight:600;white-space:nowrap}
+  td.sum{color:var(--muted)}
+  .empty{padding:44px 16px;text-align:center;color:var(--muted)}
+  .load{display:block;margin:16px auto 0}
+  footer{margin-top:26px;text-align:center;color:var(--muted);font-size:12px}
+  footer a{color:var(--accent)}
+  .hidden{display:none}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>双色球开奖数据</h1>
+    <div class="meta" id="meta">加载中…</div>
+  </header>
+
+  <section class="latest">
+    <h2>最新开奖</h2>
+    <div class="balls" id="latestBalls">
+      <span class="meta">加载中…</span>
+    </div>
+  </section>
+
+  <div class="controls">
+    <select id="yearSel" aria-label="选择年份"></select>
+    <input id="q" type="search" placeholder="搜索期号，如 2026100" aria-label="搜索期号">
+    <span class="meta" id="count"></span>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>期号</th><th>开奖日期</th><th>星期</th>
+        <th>红球</th><th>和值</th><th>蓝球</th>
+      </tr>
+    </thead>
+    <tbody id="rows"></tbody>
+  </table>
+  <button class="load hidden" id="more">加载更多</button>
+
+  <footer>
+    数据来源：中国福利彩票发行管理中心 / 中彩网 ·
+    <a href="https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/" target="_blank"
+       rel="noopener">开奖公告</a><br>
+    本项目仅供数据研究，不构成任何投注建议
+  </footer>
+</div>
+
+<script>
+let current = null, filtered = [], shown = 0;
+const PAGE = 50;
+
+const $ = id => document.getElementById(id);
+const pad = n => String(n).padStart(2, "0");
+
+// Pages 部署时 data/ 与 index.html 同级；本地预览（/site/）时需回退到上一级。
+// 逐个尝试，取第一个能成功读取的路径。
+const DATA_CANDIDATES = ["./data/", "../data/"];
+let DATA_BASE = DATA_CANDIDATES[0];
+
+async function getJSON(name) {
+  let lastErr;
+  for (const base of DATA_CANDIDATES) {
+    try {
+      const res = await fetch(base + name + "?t=" + Date.now());
+      if (!res.ok) throw new Error(name + " -> " + res.status);
+      DATA_BASE = base;
+      return await res.json();
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr || new Error("数据加载失败");
+}
+
+function ballHTML(n, cls) {
+  return `<span class="ball ${cls}">${pad(n)}</span>`;
+}
+
+function renderLatest(latest) {
+  const w = {Mon:"周一",Tue:"周二",Wed:"周三",Thu:"周四",Fri:"周五",Sat:"周六",Sun:"周日"};
+  $("latestBalls").innerHTML =
+    latest.red.map(n => ballHTML(n, "r")).join("") +
+    ballHTML(latest.blue, "b") +
+    `<span class="meta" style="margin-left:8px">第 ${latest.code} 期 · ` +
+    `${latest.date} ${w[latest.week] || ""} · 和值 ${latest.sum}</span>`;
+}
+
+function renderRows() {
+  shown = Math.min(shown + PAGE, filtered.length);
+  const w = {Mon:"一",Tue:"二",Wed:"三",Thu:"四",Fri:"五",Sat:"六",Sun:"日"};
+  $("rows").innerHTML = filtered.slice(0, shown).map(it => `
+    <tr>
+      <td class="code">${it.code}</td>
+      <td>${it.date}</td>
+      <td>${w[it.week] || "-"}</td>
+      <td style="white-space:nowrap">${it.red.map(n =>
+        `<span class="ball sm r">${pad(n)}</span>`).join(" ")}</td>
+      <td class="sum">${it.sum}</td>
+      <td>${ballHTML(it.blue, "b sm")}</td>
+    </tr>`).join("") ||
+    `<tr><td colspan="6" class="empty">没有匹配的记录</td></tr>`;
+  $("count").textContent =
+    `共 ${filtered.length} 期` + (shown < filtered.length ? `（已显示 ${shown}）` : "");
+  $("more").classList.toggle("hidden", shown >= filtered.length);
+}
+
+function applyFilter() {
+  const q = $("q").value.trim();
+  filtered = !q ? current : current.filter(it => it.code.includes(q));
+  shown = 0;
+  renderRows();
+}
+
+async function loadYear(year) {
+  $("rows").innerHTML = `<tr><td colspan="6" class="empty">加载中…</td></tr>`;
+  const data = await getJSON(year + ".json");
+  current = data.data.slice().sort((a, b) => b.code.localeCompare(a.code));
+  shown = 0;
+  renderRows();
+}
+
+async function init() {
+  try {
+    const [idx, latest] = await Promise.all([
+      getJSON("index.json"), getJSON("latest.json")
+    ]);
+
+    $("meta").textContent =
+      `${idx.startYear} - ${idx.endYear} · 共 ${idx.totalCount.toLocaleString()} 期 · ` +
+      `更新于 ${idx.updatedAt.replace("T", " ").replace("+08:00", "")}`;
+    renderLatest(latest.latest);
+
+    const sel = $("yearSel");
+    sel.innerHTML = idx.years.slice().reverse()
+      .map(y => `<option value="${y.year}">${y.year} 年（${y.count} 期）</option>`)
+      .join("");
+
+    const endYear = idx.endYear;
+    sel.value = String(endYear);
+    sel.addEventListener("change", () => loadYear(sel.value));
+    $("q").addEventListener("input", applyFilter);
+    $("more").addEventListener("click", renderRows);
+
+    await loadYear(endYear);
+  } catch (err) {
+    $("meta").textContent = "";
+    $("rows").innerHTML =
+      `<tr><td colspan="6" class="empty">数据加载失败：${err.message}<br>
+       <br>本地预览请用 HTTP 服务打开（直接双击 index.html 会被浏览器拦截读取）。</td></tr>`;
+  }
+}
+init();
+</script>
+</body>
+</html>

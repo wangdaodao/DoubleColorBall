@@ -1,0 +1,126 @@
+name: 更新双色球数据
+
+on:
+  schedule:
+    # GitHub Actions 的 cron 用 UTC，北京时间 = UTC+8
+    # 周二/周四/周日 21:30(北京) = 13:30 UTC，覆盖开奖日
+    - cron: '30 13 * * 2,4,0'
+    # 次日 01:00(北京) 补跑一次，防止首次抓取时数据尚未发布
+    - cron: '0 17 * * 1,3,5'
+  workflow_dispatch:
+    inputs:
+      years_back:
+        description: '仅刷新最近 N 年（0=全量校验）'
+        required: false
+        default: '2'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ssq-update
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 抓取开奖数据
+        id: fetch
+        env:
+          YEARS_BACK: ${{ github.event.inputs.years_back || '2' }}
+        run: |
+          set -euo pipefail
+          python scripts/fetch_ssq.py --years-back "$YEARS_BACK" 2>&1 | tee fetch.log
+          # 部分年份抓取失败时脚本返回 2：保留警告但不算失败
+          rc=${PIPESTATUS[0]}
+          if [ "$rc" -eq 2 ]; then
+            echo "::warning::部分年份抓取失败，已保留原有数据"
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::抓取失败（退出码 $rc）"
+            cat fetch.log
+            exit "$rc"
+          fi
+
+      - name: 校验数据
+        run: |
+          set -euo pipefail
+          python scripts/validate_data.py
+
+      - name: 写入运行摘要
+        if: always()
+        run: python scripts/summary.py >> "$GITHUB_STEP_SUMMARY" || true
+
+      - name: 检测变更
+        id: diff
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- data; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "无新期开奖，无需提交"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "检测到数据变更："
+            git diff --stat -- data
+          fi
+
+      - name: 提交数据
+        if: steps.diff.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data
+          ISSUE=$(python -c "import json;print(json.load(open('data/latest.json'))['latest']['code'])")
+          git commit -m "chore(data): 更新至第 ${ISSUE} 期"
+          git push
+
+  pages:
+    name: 部署网页
+    needs: update
+    runs-on: ubuntu-latest
+    if: always() && github.ref == 'refs/heads/main'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+        with:
+          # 取推送后的最新数据
+          ref: main
+
+      - name: 准备静态文件
+        run: |
+          set -euo pipefail
+          rm -rf _site
+          mkdir -p _site
+          cp -r site/. _site/
+          mkdir -p _site/data
+          cp data/*.json _site/data/
+          ls -la _site _site/data | head -40
+
+      - name: 配置 Pages
+        uses: actions/configure-pages@v5
+
+      - name: 上传站点
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - name: 发布
+        id: deploy
+        uses: actions/deploy-pages@v4

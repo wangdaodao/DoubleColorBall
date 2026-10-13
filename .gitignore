@@ -1,0 +1,5 @@
+__pycache__/
+*.pyc
+fetch.log
+_site/
+.DS_Store

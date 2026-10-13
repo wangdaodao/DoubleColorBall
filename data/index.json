@@ -1,0 +1,128 @@
+{
+  "updatedAt": "2026-10-13T09:08:14+08:00",
+  "startYear": 2003,
+  "endYear": 2026,
+  "totalCount": 3513,
+  "years": [
+    {
+      "year": 2003,
+      "count": 89,
+      "latestIssue": "2003089"
+    },
+    {
+      "year": 2004,
+      "count": 122,
+      "latestIssue": "2004122"
+    },
+    {
+      "year": 2005,
+      "count": 153,
+      "latestIssue": "2005153"
+    },
+    {
+      "year": 2006,
+      "count": 154,
+      "latestIssue": "2006154"
+    },
+    {
+      "year": 2007,
+      "count": 153,
+      "latestIssue": "2007153"
+    },
+    {
+      "year": 2008,
+      "count": 154,
+      "latestIssue": "2008154"
+    },
+    {
+      "year": 2009,
+      "count": 154,
+      "latestIssue": "2009154"
+    },
+    {
+      "year": 2010,
+      "count": 153,
+      "latestIssue": "2010153"
+    },
+    {
+      "year": 2011,
+      "count": 153,
+      "latestIssue": "2011153"
+    },
+    {
+      "year": 2012,
+      "count": 154,
+      "latestIssue": "2012154"
+    },
+    {
+      "year": 2013,
+      "count": 154,
+      "latestIssue": "2013154"
+    },
+    {
+      "year": 2014,
+      "count": 152,
+      "latestIssue": "2014152"
+    },
+    {
+      "year": 2015,
+      "count": 154,
+      "latestIssue": "2015154"
+    },
+    {
+      "year": 2016,
+      "count": 153,
+      "latestIssue": "2016153"
+    },
+    {
+      "year": 2017,
+      "count": 154,
+      "latestIssue": "2017154"
+    },
+    {
+      "year": 2018,
+      "count": 153,
+      "latestIssue": "2018153"
+    },
+    {
+      "year": 2019,
+      "count": 151,
+      "latestIssue": "2019151"
+    },
+    {
+      "year": 2020,
+      "count": 134,
+      "latestIssue": "2020134"
+    },
+    {
+      "year": 2021,
+      "count": 150,
+      "latestIssue": "2021150"
+    },
+    {
+      "year": 2022,
+      "count": 150,
+      "latestIssue": "2022150"
+    },
+    {
+      "year": 2023,
+      "count": 151,
+      "latestIssue": "2023151"
+    },
+    {
+      "year": 2024,
+      "count": 151,
+      "latestIssue": "2024151"
+    },
+    {
+      "year": 2025,
+      "count": 151,
+      "latestIssue": "2025151"
+    },
+    {
+      "year": 2026,
+      "count": 116,
+      "latestIssue": "2026116"
+    }
+  ]
+}

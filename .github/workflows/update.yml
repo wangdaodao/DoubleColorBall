@@ -3,8 +3,6 @@ name: 更新双色球数据
 on:
   schedule:
     # GitHub Actions 的 cron 用 UTC，北京时间 = UTC+8
-    # 周二/周四/周日 21:30(北京) = 13:30 UTC，覆盖开奖日
-    - cron: '30 13 * * 2,4,0'
     # 次日 01:00(北京) 补跑一次，防止首次抓取时数据尚未发布
     - cron: '0 17 * * 1,3,5'
   workflow_dispatch:

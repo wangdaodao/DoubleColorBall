@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""双色球开奖数据抓取器（按年存JSON）
+"""双色球开奖数据抓取器（按年存JSON）:
 
-数据源（按优先级）：
-  1. 中国福利彩票发行管理中心官方开奖公告接口（权威来源）
-  2. 17500 备用数据源（data.17500.cn 全量历史文本，GBK）
-     —— 官网接口对境外/机房 IP 会返回 403（GitHub Actions 常见），
-        此时自动切换到备用源，一次请求即可覆盖所有年份。
+数据源：17500 备用数据源（data.17500.cn 全量历史文本，GBK）
+  —— 官网接口对境外/机房 IP 会返回 403（GitHub Actions 常见），
+     因此本脚本固定从备用源获取，一次请求即可覆盖所有年份。
 
 输出：data/<年份>.json + data/latest.json
 
 设计要点
-  - 按年请求（issueStart/issueEnd），规避单次返回上限，只增量抓当年
+  - 一次请求下载全量历史，按年份拆分，只增量写变化的年度文件
   - 幂等：内容与磁盘一致则不写文件，便于 Action 里判断"有无新数据"
-  - 失败重试 + 退避；被 WAF 拦截（403 等）不重试，直接切换备用源
-  - 某一年失败不阻断其余年份
+  - 失败重试 + 退避；数据源整体不可用时保留原有数据并返回 2
+  - 某一年无数据不阻断其余年份
 """
 from __future__ import annotations
 
@@ -24,36 +22,25 @@ import random
 import re
 import sys
 import time
-import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-API = ("https://www.cwl.gov.cn/cwl_admin/front/cwlkj/search/kjxx/"
-       "findDrawNotice")
+# 数据源：17500 全量历史文本（GBK 编码），一次请求覆盖所有年份
+DATA_URL = "https://data.17500.cn/ssq_asc.txt"
 
 HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
                    "AppleWebKit/537.36 (KHTML, like Gecko) "
                    "Chrome/120.0.0.0 Safari/537.36"),
-    "Referer": "https://www.cwl.gov.cn/ygkj/wqkjgg/ssq/",
-    "Accept": "application/json, text/javascript, */*; q=0.01",
-    "X-Requested-With": "XMLHttpRequest",
     "Accept-Language": "zh-CN,zh;q=0.9",
 }
 
 CST = timezone(timedelta(hours=8))
-REQUEST_INTERVAL = 0.8  # 每年请求之间的间隔秒数
 WEEK_EN = {"一": "Mon", "二": "Tue", "三": "Wed", "四": "Thu",
            "五": "Fri", "六": "Sat", "日": "Sun"}
 
 DATE_RE = re.compile(r"^(\d{4})-(\d{2})-(\d{2})")
-
-# 被 WAF / 地域限制直接拒绝的状态码：重试无意义，立即切换备用数据源
-BLOCKED_STATUS = {401, 403, 418, 429, 451}
-
-# 备用数据源：17500 全量历史文本（GBK 编码），一次请求覆盖所有年份
-FALLBACK_URL = "https://data.17500.cn/ssq_asc.txt"
 
 
 # ---------------------------------------------------------------- 工具
@@ -68,50 +55,18 @@ def _http_get(url: str, timeout: int) -> bytes:
         return resp.read()
 
 
-def fetch_official(year: int, retries: int = 3, timeout: int = 30) -> list[dict]:
-    """从福彩官网接口抓取某一年的全部期次，失败自动退避重试。"""
-    url = (f"{API}?name=ssq&issueStart={year}001"
-           f"&issueEnd={year}999&pageNo=1&pageSize=1000")
+_all_rows: list[dict] | None = None
+
+
+def load_all_rows(retries: int = 3, timeout: int = 60) -> list[dict]:
+    """下载并解析 17500 数据源全量历史（每次运行只下载一次，结果缓存复用）。"""
+    global _all_rows
+    if _all_rows is not None:
+        return _all_rows
     last_err: Exception | None = None
     for attempt in range(1, retries + 1):
         try:
-            payload = json.loads(_http_get(url, timeout).decode("utf-8"))
-            if payload.get("state") != 0:
-                raise ValueError(f"接口返回 state={payload.get('state')} "
-                                 f"message={payload.get('message')}")
-            rows = payload.get("result") or []
-            log(f"  {year}: 抓到 {len(rows)} 期（官网接口）")
-            return rows
-        except urllib.error.HTTPError as exc:
-            last_err = exc
-            if exc.code in BLOCKED_STATUS:
-                # IP 被官网 WAF 拦截（如 GitHub Actions 海外 IP），重试无意义
-                raise
-            if attempt < retries:
-                wait = min(2 ** attempt + random.random(), 20)
-                log(f"  {year}: 第 {attempt} 次失败({exc})，{wait:.1f}s 后重试")
-                time.sleep(wait)
-        except Exception as exc:  # noqa: BLE001 - 网络/接口异常统一重试
-            last_err = exc
-            if attempt < retries:
-                wait = min(2 ** attempt + random.random(), 20)
-                log(f"  {year}: 第 {attempt} 次失败({exc})，{wait:.1f}s 后重试")
-                time.sleep(wait)
-    raise RuntimeError(f"{year} 年官网数据抓取失败: {last_err}")
-
-
-_fallback_rows: list[dict] | None = None
-
-
-def load_fallback(retries: int = 3, timeout: int = 60) -> list[dict]:
-    """下载并解析 17500 备用数据源（每次运行只下载一次，结果缓存复用）。"""
-    global _fallback_rows
-    if _fallback_rows is not None:
-        return _fallback_rows
-    last_err: Exception | None = None
-    for attempt in range(1, retries + 1):
-        try:
-            text = _http_get(FALLBACK_URL, timeout).decode("gbk", "ignore")
+            text = _http_get(DATA_URL, timeout).decode("gbk", "ignore")
             rows: list[dict] = []
             for line in text.splitlines():
                 parts = line.split()
@@ -129,42 +84,30 @@ def load_fallback(retries: int = 3, timeout: int = 60) -> list[dict]:
                 })
             if not rows:
                 raise ValueError("内容为空或格式不符")
-            log(f"  备用数据源(17500): {len(rows)} 期"
+            log(f"数据源(17500): {len(rows)} 期"
                 f"（{rows[0]['code']}~{rows[-1]['code']}）")
-            _fallback_rows = rows
+            _all_rows = rows
             return rows
         except Exception as exc:  # noqa: BLE001 - 网络/解析异常统一重试
             last_err = exc
             if attempt < retries:
                 wait = min(2 ** attempt + random.random(), 20)
-                log(f"  备用数据源: 第 {attempt} 次失败({exc})，{wait:.1f}s 后重试")
+                log(f"数据源: 第 {attempt} 次失败({exc})，{wait:.1f}s 后重试")
                 time.sleep(wait)
-    raise RuntimeError(f"备用数据源抓取失败: {last_err}")
-
-
-def fetch_fallback(year: int) -> list[dict]:
-    """从 17500 备用数据源筛选某一年的期次。"""
-    rows = [r for r in load_fallback() if r["code"][:4] == str(year)]
-    if not rows:
-        raise ValueError(f"备用数据源无 {year} 年数据")
-    log(f"  {year}: 从备用数据源获取 {len(rows)} 期")
-    return rows
+    raise RuntimeError(f"数据源抓取失败: {last_err}")
 
 
 def fetch_year(year: int) -> list[dict]:
-    """抓取某一年的全部期次：优先官网，失败自动切换备用数据源。"""
-    errors: list[str] = []
-    for name, fn in (("官网接口", fetch_official), ("备用数据源", fetch_fallback)):
-        try:
-            return fn(year)
-        except Exception as exc:  # noqa: BLE001 - 单一来源失败不阻断整体
-            log(f"  !! {year} {name}失败: {exc}")
-            errors.append(f"{name}: {exc}")
-    raise RuntimeError(f"{year} 年数据抓取失败（" + "；".join(errors) + "）")
+    """从全量数据中筛选某一年的期次。"""
+    rows = [r for r in load_all_rows() if r["code"][:4] == str(year)]
+    if not rows:
+        raise ValueError(f"数据源无 {year} 年数据")
+    log(f"  {year}: 获取 {len(rows)} 期")
+    return rows
 
 
 def normalize(row: dict) -> dict | None:
-    """把官网原始记录转成精简字段；字段缺失返回 None。"""
+    """把原始记录转成精简字段；字段缺失返回 None。"""
     code = (row.get("code") or "").strip()
     raw_date = (row.get("date") or "").strip()
     m = DATE_RE.match(raw_date)
@@ -176,18 +119,12 @@ def normalize(row: dict) -> dict | None:
     if len(reds) != 6 or not blue_raw.isdigit():
         return None
 
-    # 官网日期形如 "2026-10-11(日)"，括号内为中文星期；
-    # 备用数据源只给日期，此时按日期推算星期
-    cn_week = ""
-    wm = re.search(r"[（(]([一二三四五六日])[)）]", raw_date)
-    if wm:
-        cn_week = wm.group(1)
-    else:
-        try:
-            cn_week = "一二三四五六日"[datetime.strptime(
-                m.group(0), "%Y-%m-%d").weekday()]
-        except ValueError:
-            pass
+    # 17500 数据源只给日期，按日期推算星期
+    try:
+        cn_week = "一二三四五六日"[datetime.strptime(
+            m.group(0), "%Y-%m-%d").weekday()]
+    except ValueError:
+        cn_week = ""
 
     red = sorted(reds)
     return {
@@ -251,7 +188,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description="抓取双色球开奖数据并按年存 JSON")
     ap.add_argument("--data-dir", default="data", help="输出目录，默认 data")
     ap.add_argument("--start-year", type=int, default=2013,
-                    help="起始年份，默认 2013（福彩官网接口最早年份）")
+                    help="起始年份，默认 2013（数据源最早覆盖到 2003）")
     ap.add_argument("--years-back", type=int, default=0,
                     help="仅刷新最近 N 年，0=全部年份（默认全量校验）")
     args = ap.parse_args()
@@ -273,6 +210,13 @@ def main() -> int:
         # 仍然校验一次 latest
         return sync_latest(data_dir, years, dry=True)
 
+    # 一次请求拉取全量历史（内部缓存，后续年份直接复用）
+    try:
+        load_all_rows()
+    except Exception as exc:  # noqa: BLE001 - 数据源不可用时保留原有数据
+        log(f"!! 数据源抓取失败，已保留原有数据: {exc}")
+        return 2
+
     log(f"待抓取年份: {todo[0]}~{todo[-1]}（共 {len(todo)} 个）")
 
     merged: dict[int, list[dict]] = {}
@@ -283,9 +227,6 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - 单年失败不阻断整体
             log(f"  !! {exc}")
             failures.append(year)
-        if year != todo[-1]:
-            # 礼貌间隔，避免对官网接口造成压力
-            time.sleep(REQUEST_INTERVAL)
 
     if failures:
         log(f"以下年份抓取失败（保留原有文件）: {failures}")
@@ -303,7 +244,7 @@ def main() -> int:
             log(f"  {year}.json 无变化")
 
     if not merged:
-        log("所有数据源均失败，已保留原有数据")
+        log("数据源无有效数据，已保留原有数据")
         return 2
 
     rc = sync_latest(data_dir, years, dry=False)
